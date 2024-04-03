@@ -3,7 +3,7 @@
 class Main inherits IO{
     toCut: String <- "hello";
     main() : Object {
-        out_string(toCut.substr(992334534534534534534,99))
+        out_string(toCut.substr(2147483647 + 1,99))
     };
 
 };

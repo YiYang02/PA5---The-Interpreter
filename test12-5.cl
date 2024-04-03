@@ -11,7 +11,7 @@ class Main inherits IO{
         else
             -- never strips the last character of x
             {
-                let name : Int <- fakeMethod(name) in
+                let name : Int <- fakeMethod(name <- "50") in
                 out_string("hi");
                 out_string(name);
             }

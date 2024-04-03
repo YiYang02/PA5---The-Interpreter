@@ -13,7 +13,7 @@ class Main inherits IO{
             {
                 let name : Int <- fakeMethod(name) in
                 out_string("hi");
-                out_int(name);
+                out_string(name);
             }
         fi
     };
