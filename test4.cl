@@ -28,9 +28,21 @@ Class Z Inherits Y {
 	}};
 };
 
+Class TestIntOverFlow inherits IO {
+	 test(x : Int) : SELF_TYPE{{
+	out_int(x + 2147483647 + 2147483647 + 2147483647 + 4);
+	out_string("-");
+	out_string("ClassC");
+	out_string(" ");
+	self;
+}};
+};
+
+
 Class Main Inherits IO{
 
 	main() : Object {{
+		(new TestIntOverFlow).test(2147483647 + ~2147483647 + ~0 + ~~0);
 		(new Z).methodA(2147483647).methodA(~2147483647)@Y.methodA(~2147483647).methodA(~2147483647).methodA(~2147483647).methodA(~2147483647)@X.methodA(~2147483647);
 
 	}};
