@@ -12,7 +12,6 @@ class FieldUpdate():
             return self.st
         except:
             pass
-    
         
 class New(namedtuple("New", "loc exp")): pass
 class IsVoid(namedtuple("IsVoid", "loc exp")): pass
@@ -38,6 +37,8 @@ class SELF_TYPE(namedtuple("SELF_TYPE", "loc exp")): pass
 class Assign(namedtuple("Assign", "loc var exp")): pass
 class SelfDispatch(namedtuple("SelfDispatch", "loc methodName exp")): pass
 class DynamicDispatch(namedtuple("DynamicDispatch", "loc e methodName exp")): pass
+class StaticDispatch(namedtuple("StaticDispatch", "loc e type methodName exp")): pass
+
 class CoolValue(namedtuple("CoolValue", "type value")): pass 
 class CoolInt(namedtuple("CoolInt", "className attrs_and_locs loc value"), FieldUpdate): pass 
 class CoolString(namedtuple("CoolString", "className attrs_and_locs loc value length"), FieldUpdate): pass 
@@ -116,7 +117,7 @@ def read_exp(e):
 	_ = read(e) # expression type
 	e_kind = read(e)
 	# create namedtuple object based on expression kind
- 
+	print(e)
 	if e_kind == "identifier":
 		return read_id(e)
 	elif e_kind == "isvoid":
@@ -134,16 +135,24 @@ def read_exp(e):
 		id_ver = read_id(e) 
 		return New(id_ver.loc, id_ver.exp)
 	elif e_kind == "self_dispatch":
-		funcid = read_id(e)
-		file_name = funcid.exp
+		method_name = read_id(e)
+		file_name = method_name.exp
 		num_of_args = int(read(e))
 		return SelfDispatch(loc, file_name,read_exp_list(read_exp(e),num_of_args))
 	elif e_kind == "dynamic_dispatch":
 		e0 = read_exp(e)
-		funcid = read_id(e)
-		file_name = funcid.exp
+		method_name = read_id(e)
+		file_name = method_name.exp
 		num_of_args = int(read(e))
 		return DynamicDispatch(loc, e0, file_name, read_exp_list(read_exp(e),num_of_args))
+	elif e_kind == "static_dispatch":
+		e0 = read_exp(e)	
+		static_type = read_id(e)
+		method_name = read_id(e)
+		num_of_args = int(read(e))
+		arg_list = [read_exp(e) for i in range(num_of_args)]
+		return StaticDispatch(loc, e0, static_type, method_name.exp, arg_list)
+	
 	else:
 		print(f"e_kind not handled {e_kind}")
 		exit(0)
@@ -253,7 +262,7 @@ def eval(self_object,store,env,exp):
 	elif isinstance(exp, SelfDispatch):
 		# call dynamic_dispatch, but use the self object as receiver exp
 		self_exp = Identifier(0, "self")
-		ret_exp = DynamicDispatch(exp.loc, self_exp, exp.methodName, exp.exp)
+		ret_exp = DynamicDispatch(exp.loc, self_exp, exp.method_name, exp.exp)
 		(ret_value,ret_store) = eval(self_object,store,env,ret_exp)
 		debug(f"ret = {str(ret_value)}")
 		debug(f"rets = {str(ret_store)}")
@@ -268,13 +277,13 @@ def eval(self_object,store,env,exp):
 			current_store = new_store
 			arg_values.append(arg_value)
 
-		if exp.methodName == "out_string": #TODO: handle other method, maybe modularize
+		if exp.method_name == "out_string": #TODO: handle other method, maybe modularize
 			#replace \n str representation to actual \n
 			print(arg_values[0].value.replace("\\n","\n"), end="")
 
 		# eval receiver expression
 		(v0, s_n2) = eval(self_object, current_store, env, exp.e)
-		(formals, body) = imp_map[(v0.className, exp.methodName)]
+		(formals, body) = imp_map[(v0.className, exp.method_name)]
 		# allocate mem for each args
 		new_arg_locs = [ newloc() for _ in exp.exp]
 		s_n3 = s_n2
@@ -290,6 +299,8 @@ def eval(self_object,store,env,exp):
 		debug(f"rets = {str(ret_store)}")
 		indent_count -= 2
 		return (ret_value,ret_store)
+	elif isinstance(exp, StaticDispatch):
+		pass #TODO 
 	elif isinstance(exp, Plus): 
 		e1 = exp.exp[0]
 		e2 = exp.exp[1]
