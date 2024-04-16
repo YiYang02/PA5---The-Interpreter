@@ -15,24 +15,29 @@ class FieldUpdate():
         
 class New(namedtuple("New", "loc exp")): pass
 class IsVoid(namedtuple("IsVoid", "loc exp")): pass
-class LT(namedtuple("lt", "loc exp")): pass
-class LE(namedtuple("le", "loc exp")): pass
+class LT(namedtuple("lt", "loc left_exp right_exp")): pass
+class LE(namedtuple("le", "loc left_exp right_exp")): pass
 class Negate(namedtuple("Negate", "loc exp")): pass
-class Equal(namedtuple("Equal", "loc exp")): pass
-class Times(namedtuple("Times", "loc exp")): pass
-class Divide(namedtuple("Divide", "loc exp")): pass
-class Times(namedtuple("Times", "loc exp")): pass
-class Minus(namedtuple("Minus", "loc exp")): pass
-class Plus(namedtuple("Plus", "loc exp")): pass
+class Equal(namedtuple("Equal", "loc left_exp right_exp")): pass
+class Times(namedtuple("Times", "loc left_exp right_exp")): pass
+class Divide(namedtuple("Divide", "loc left_exp right_exp")): pass
+class Minus(namedtuple("Minus", "loc left_exp right_exp")): pass
+class Plus(namedtuple("Plus", "loc left_exp right_exp")): pass
 class Not(namedtuple("Not", "loc exp")): pass
 class Integer(namedtuple("Integer", "loc exp")): pass 
 class String(namedtuple("String", "loc exp")): pass
+class If(namedtuple("If", "loc predicate then else_exp")): pass
+class Block(namedtuple("Block", "loc expList")): pass
+class While(namedtuple("While", "loc pred body")) : pass
+class Let(namedtuple("Let", "loc body binding_list")): pass
+class Binding(namedtuple("Binding", "id type exp")): pass
+class Case(namedtuple("Case", "loc case_exp case_elem_list")): pass
+class CaseElement(namedtuple("CaseElement", "loc var type body")):  pass
 class true(namedtuple("true", "loc exp")): pass
 class false(namedtuple("false", "loc exp")): pass
 class Identifier(namedtuple("Identifier", "loc exp")): pass
 class Object(namedtuple("Object", "loc exp")): pass
 class Int(namedtuple("Int", "loc exp")): pass
-class IO(namedtuple("IO", "loc exp")): pass
 class SELF_TYPE(namedtuple("SELF_TYPE", "loc exp")): pass
 class Assign(namedtuple("Assign", "loc var exp")): pass
 class SelfDispatch(namedtuple("SelfDispatch", "loc methodName exp")): pass
@@ -40,9 +45,9 @@ class DynamicDispatch(namedtuple("DynamicDispatch", "loc e methodName exp")): pa
 class StaticDispatch(namedtuple("StaticDispatch", "loc e type methodName exp")): pass
 
 class CoolValue(namedtuple("CoolValue", "type value")): pass 
-class CoolInt(namedtuple("CoolInt", "className attrs_and_locs loc value"), FieldUpdate): pass 
-class CoolString(namedtuple("CoolString", "className attrs_and_locs loc value length"), FieldUpdate): pass 
-class CoolBool(namedtuple("CoolString", "className attrs_and_locs loc value"), FieldUpdate): pass 
+class CoolInt(namedtuple("CoolInt", "value"), FieldUpdate): pass 
+class CoolString(namedtuple("CoolString", "loc value length"), FieldUpdate): pass 
+class CoolBool(namedtuple("CoolString", "value"), FieldUpdate): pass 
 class CoolObject(namedtuple("CoolObject", "className attrs_and_locs loc"), FieldUpdate): pass
 
 class Void(namedtuple("Void", "className")) : pass
@@ -73,23 +78,25 @@ class_map_ast = []
 parent_map_ast = []
 imp_map_ast = []
 
-current_section = None
+def populate_ast_sections():
+	current_section = None
+	for line in ast_file:
+		if line == "implementation_map":
+			current_section = imp_map_ast
+		elif line == "parent_map":
+			current_section = parent_map_ast
+		elif line == "class_map":
+			current_section = class_map_ast
+		
+		if current_section is not None:
+			current_section.append(line)
+	return current_section
 
-for line in ast_file:
-    if line == "implementation_map":
-        current_section = imp_map_ast
-    elif line == "parent_map":
-        current_section = parent_map_ast
-    elif line == "class_map":
-        current_section = class_map_ast
-    
-    if current_section is not None:
-        current_section.append(line)
-
+populate_ast_sections()
 # Deserialize the class_map
 class_map = {}
 imp_map = {}
-
+parent_map = {}
 
 def read(e):
 	this_line = e[0]
@@ -112,14 +119,32 @@ def read_internal_exp(e):
 	return SELF_TYPE(loc, body) #TODO : this is hardcoded
 
 
+def read_binding(e):
+	bkind = read(e)
+	if bkind == "let_binding_init":
+		binding_id = read_id()
+		binding_id_type = read_id()
+		binding_exp = read_exp()
+		return Binding(binding_id, binding_id_type, binding_exp)
+	else:
+		binding_id = read_id(e)
+		binding_id_type = read_id(e)
+		return Binding(binding_id, binding_id_type, None)
+
 def read_exp(e):
-	loc = read(e)
-	_ = read(e) # expression type
-	e_kind = read(e)
-	# create namedtuple object based on expression kind
-	# print(e)
+	
+	if e[1][0].islower():
+		loc = read(e)
+		e_kind = read(e)
+	else: # from ast, the extra class name we add that serves as a type
+		loc = read(e)
+		_ = read(e)
+		e_kind = read(e)
+  
 	if e_kind == "identifier":
 		return read_id(e)
+	elif e_kind == "not":
+		return Not(loc, read_exp(e))
 	elif e_kind == "isvoid":
 		return IsVoid(loc, read_exp(e))		# return t
 	elif e_kind == "string":
@@ -152,10 +177,79 @@ def read_exp(e):
 		num_of_args = int(read(e))
 		arg_list = [read_exp(e) for _ in range(num_of_args)]
 		return StaticDispatch(loc, e0, static_type.exp, method_name.exp, arg_list)
+	elif e_kind == "true":
+		return true(loc, "true")
+	elif e_kind == "false":
+		return false(loc, "false")
+	elif e_kind == "negate":
+		exp = read_exp(e)
+		return Negate(loc, exp)
+	elif e_kind == "times":
+		left_exp = read_exp(e)
+		right_exp = read_exp(e)
+		return Times(loc,left_exp,  right_exp)
+	elif e_kind == "divide":
+		left_exp = read_exp(e)
+		right_exp = read_exp(e)
+		return Divide(loc,left_exp,  right_exp)
+	elif e_kind == "plus":
+		left_exp = read_exp(e)
+		right_exp = read_exp(e)
+		return Plus(loc,left_exp,  right_exp)
+	elif e_kind == "minus":
+		left_exp = read_exp(e)
+		right_exp = read_exp(e)
+		return Minus(loc,left_exp,  right_exp)
+	elif e_kind == "le":
+		left_exp = read_exp(e)
+		right_exp = read_exp(e)
+		return LE(loc,left_exp,  right_exp)	
+	elif e_kind == "lt":
+		left_exp = read_exp(e)
+		right_exp = read_exp(e)
+		return LT(loc,left_exp, right_exp)
+	elif e_kind == "eq":
+		left_exp = read_exp(e)
+		right_exp = read_exp(e)
+		return Equal(loc,left_exp, right_exp)
+	elif e_kind == "if":
+		pred = read_exp(e)
+		then = read_exp(e)
+		else_s = read_exp(e)
+		return If(loc, pred, then, else_s)
+	elif e_kind == "block":
+		exp_count = int(read(e))
+		all_exps = [read_exp(e) for e in range(exp_count)]
+		return Block(loc, all_exps)
+	elif e_kind == "while":
+		pred = read_exp(e)
+		body = read_exp(e)
+		return While(loc, pred, body)
+	elif e_kind == "case":
+		exp = read_exp(e)
+		num_elems = int(read(e))
+		case_elem_list = []
+		for i in range(num_elems):
+			var = read_id(e)
+			type = read_id(e)
+			body = read_exp(e)
+			case_elem_list.append(CaseElement(var, type, body))
+		return Case(loc, exp, case_elem_list)
+	elif e_kind == "let":
+		num_bindings = int(read(e))
+		binding_list = [read_binding(e) for i in range(num_bindings)]
+		body = read_exp(e)
+		return Let(loc, binding_list, body)
 	else:
 		print(f"e_kind not handled {e_kind}")
 		exit(0)
-	
+
+def populate_parent_map(parent_map_ast):
+	num_classes = int(read(parent_map_ast))		
+	for i in range(num_classes):
+		parent_map[read(parent_map_ast)] = read(parent_map_ast)
+		num_classes -= 1
+  	
 def populate_class_map(class_map_ast):
     num_classes = int(read(class_map_ast))
     for i in range(num_classes):
@@ -189,6 +283,8 @@ def populate_imp_map(imp_map_ast):
 			imp_map[(class_name,method_name)] = (formal_list, m_body)
 
 
+# first index is label (class_map, parent_map, implementation_map) etc
+populate_parent_map(parent_map_ast[1:])
 populate_class_map(class_map_ast[1:])
 populate_imp_map(imp_map_ast[1:])
 
@@ -200,11 +296,11 @@ def newloc():
 
 def default_value(typename):
 	if typename == "Int":
-		return CoolInt("Int", {}, 0, 0, )
+		return CoolInt(0)
 	elif typename == "String":
-		return CoolString("String", {}, 0, "", 0)
+		return CoolString(0, "", 0)
 	elif typename == "Bool":
-		return CoolBool("Bool", {}, 0, False)
+		return CoolBool(False)
 	else:
 		return Void("RETURNED VOID") 
 
@@ -282,6 +378,9 @@ def eval(self_object,store,env,exp):
 		if exp.methodName == "out_string": #TODO: handle other method, maybe modularize
 			#replace \n str representation to actual \n
 			print(arg_values[0].value.replace("\\n","\n"), end="")
+		elif exp.methodName == "out_int":
+			print("got here")
+			print(int(arg_values[0].value.replace("\\n","\n"), end=""))
 
 		# eval receiver expression
 		(v0, s_n2) = eval(self_object, curr_store, env, exp.e)
@@ -353,7 +452,7 @@ def eval(self_object,store,env,exp):
 		debug(f"ret = {str(value)}")
 		debug(f"rets = {str(store)}")
 		indent_count -= 2
-		return (CoolString("String", {}, 0, value, length), store)
+		return (CoolString(0, value, length), store)
 	elif isinstance(exp, Identifier):
 		id = exp.exp
 		if id == "self":
@@ -369,9 +468,9 @@ def eval(self_object,store,env,exp):
 	elif isinstance(exp, IsVoid):
 		pass
 	elif isinstance(exp, false):
-		pass
+		return (CoolBool(False), store)
 	elif isinstance(exp, true):
-		pass
+		return (CoolBool(True), store)
 	else:
 		print(f"unhandled exp for {exp}")
 		exit(0)
