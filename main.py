@@ -117,7 +117,7 @@ def read_exp(e):
 	_ = read(e) # expression type
 	e_kind = read(e)
 	# create namedtuple object based on expression kind
-	print(e)
+	# print(e)
 	if e_kind == "identifier":
 		return read_id(e)
 	elif e_kind == "isvoid":
@@ -150,9 +150,8 @@ def read_exp(e):
 		static_type = read_id(e)
 		method_name = read_id(e)
 		num_of_args = int(read(e))
-		arg_list = [read_exp(e) for i in range(num_of_args)]
-		return StaticDispatch(loc, e0, static_type, method_name.exp, arg_list)
-	
+		arg_list = [read_exp(e) for _ in range(num_of_args)]
+		return StaticDispatch(loc, e0, static_type.exp, method_name.exp, arg_list)
 	else:
 		print(f"e_kind not handled {e_kind}")
 		exit(0)
@@ -242,8 +241,8 @@ def eval(self_object,store,env,exp):
 		final_store = s2
 		for (attr_name,_,attr_init) in attr_and_inits:
 			if attr_init != []:
-				(_,current_store) = eval(v1, final_store, attrs_and_locs, Assign(0,attr_name, attr_init))
-				final_store = current_store
+				(_,curr_store) = eval(v1, final_store, attrs_and_locs, Assign(0,attr_name, attr_init))
+				final_store = curr_store
 
 		debug(f"ret = {str(v1)}")
 		debug(f"rets = {str(final_store)}")
@@ -255,6 +254,7 @@ def eval(self_object,store,env,exp):
 		del s2[l1]
 		s3 = s2
 		s3[l1] = v1 # replace s2's l1 with v1
+		v1._replace(loc = l1)
 		debug(f"ret = {(v1)}")
 		debug(f"rets = {(s3)}")
 		indent_count -= 2
@@ -262,45 +262,75 @@ def eval(self_object,store,env,exp):
 	elif isinstance(exp, SelfDispatch):
 		# call dynamic_dispatch, but use the self object as receiver exp
 		self_exp = Identifier(0, "self")
-		ret_exp = DynamicDispatch(exp.loc, self_exp, exp.method_name, exp.exp)
+		ret_exp = DynamicDispatch(exp.loc, self_exp, exp.methodName, exp.exp)
 		(ret_value,ret_store) = eval(self_object,store,env,ret_exp)
 		debug(f"ret = {str(ret_value)}")
 		debug(f"rets = {str(ret_store)}")
 		indent_count -= 2
 		return (ret_value,ret_store)
 	elif isinstance(exp, DynamicDispatch):
-		current_store = copy.deepcopy(store)
+		curr_store = copy.deepcopy(store)
 		arg_values = []
 		# eval each arg while updating store
 		for arg in exp.exp:
-			(arg_value, new_store) = eval(self_object, current_store, env, arg)
-			current_store = new_store
+			(arg_value, new_store) = eval(self_object, curr_store, env, arg)
+			curr_store = new_store
 			arg_values.append(arg_value)
 
-		if exp.method_name == "out_string": #TODO: handle other method, maybe modularize
+		print("280", exp.methodName)
+		print("281", exp)
+		if exp.methodName == "out_string": #TODO: handle other method, maybe modularize
 			#replace \n str representation to actual \n
 			print(arg_values[0].value.replace("\\n","\n"), end="")
 
 		# eval receiver expression
-		(v0, s_n2) = eval(self_object, current_store, env, exp.e)
-		(formals, body) = imp_map[(v0.className, exp.method_name)]
+		(v0, s_n2) = eval(self_object, curr_store, env, exp.e)
+		print("288", v0)
+		(formals, body) = imp_map[(v0.className, exp.methodName)]
 		# allocate mem for each args
 		new_arg_locs = [ newloc() for _ in exp.exp]
 		s_n3 = s_n2
 		store_update = dict(zip(new_arg_locs, arg_values))
 		for loc in store_update.keys(): 
 			s_n3[loc] = store_update[loc]
+
 		new_enviroment = copy.deepcopy(v0.attrs_and_locs)
 		env_update = dict(zip(formals, new_arg_locs))
 		for (identifier,loc) in env_update.items():
 			env_update[identifier] = loc
+
 		(ret_value,ret_store) = eval(v0, s_n3, new_enviroment, body)
 		debug(f"ret = {str(ret_value)}")
 		debug(f"rets = {str(ret_store)}")
 		indent_count -= 2
 		return (ret_value,ret_store)
 	elif isinstance(exp, StaticDispatch):
-		pass #TODO 
+		curr_store = copy.deepcopy(store)
+		arg_values = []
+
+		for arg in exp.exp:
+			(arg_value, new_store) = eval(self_object, curr_store, env, arg)
+			curr_store = new_store
+			arg_values.append(arg_value)
+		(v0, s_n2) = eval(self_object, curr_store, env, exp.e)
+		(formals, body) = imp_map[(exp.type, exp.methodName)]
+		new_arg_locs = [newloc() for f in formals]
+		s_n3 = s_n2
+		new_store = dict(zip(new_arg_locs, arg_values))
+		for loc in new_store.keys():
+			new_store[loc]._replace(loc = loc)
+			s_n3[loc] = new_store[loc]
+
+		new_env = v0.attrs_and_locs
+		env_update = dict(zip(formals, new_arg_locs))
+		for id in env_update.keys():
+			new_env[id] = env_update[id]
+
+		(ret_value, ret_store) = eval(v0, s_n3, new_env, body)
+		debug(f"ret = {ret_value}")
+		debug(f"rets = {ret_store}")
+		indent_count -= 2
+		return (ret_value, ret_store)
 	elif isinstance(exp, Plus): 
 		e1 = exp.exp[0]
 		e2 = exp.exp[1]
@@ -345,15 +375,12 @@ def eval(self_object,store,env,exp):
 	else:
 		print(f"unhandled exp for {exp}")
 		exit(0)
+	
 
 # cool entry point is Main's main method
 entry_point = DynamicDispatch(0, New(0, "Main"), "main", [])
 (new_value, new_store) = eval(Void("ENTRY"), {}, {}, entry_point)
-
-
-
-
-
+# print((new_value, new_store))
 
 
 

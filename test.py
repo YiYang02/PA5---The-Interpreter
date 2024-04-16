@@ -3,17 +3,6 @@ import copy
 
 from collections import namedtuple
 
-
-class FieldUpdate():
-    def set_attrs_and_locs(self, st): 
-        self.st = st
-    def get_attrs_and_locs(self): 
-        try:
-            return self.st
-        except:
-            pass
-    
-        
 class New(namedtuple("New", "loc exp")): pass
 class IsVoid(namedtuple("IsVoid", "loc exp")): pass
 class LT(namedtuple("lt", "loc exp")): pass
@@ -39,12 +28,10 @@ class Assign(namedtuple("Assign", "loc var exp")): pass
 class SelfDispatch(namedtuple("SelfDispatch", "loc methodName exp")): pass
 class DynamicDispatch(namedtuple("DynamicDispatch", "loc e methodName exp")): pass
 class CoolValue(namedtuple("CoolValue", "type value")): pass 
-class CoolInt(namedtuple("CoolInt", "className attrs_and_locs loc value"), FieldUpdate): pass 
-class CoolString(namedtuple("CoolString", "className attrs_and_locs loc value length"), FieldUpdate): pass 
-class CoolBool(namedtuple("CoolString", "className attrs_and_locs loc value"), FieldUpdate): pass 
-class CoolObject(namedtuple("CoolObject", "className attrs_and_locs loc"), FieldUpdate): pass
-
-class Void(namedtuple("Void", "className")) : pass
+class CoolInt(namedtuple("CoolInt", "className attrs_and_locs loc value")): pass 
+class CoolString(namedtuple("CoolString", "className attrs_and_locs loc value length")): pass 
+class CoolBool(namedtuple("CoolString", "className attrs_and_locs loc value")): pass 
+class CoolObject(namedtuple("CoolObject", "className attrs_and_locs loc")): pass
 
 # Debugging and Tracing
 do_debug = False
@@ -190,150 +177,143 @@ def newloc():
 
 def default_value(typename):
 	if typename == "Int":
-		return CoolInt("Int", {}, 0, 0, )
+		return CoolInt("Int", {}, 0, 0)
 	elif typename == "String":
 		return CoolString("String", {}, 0, "", 0)
 	elif typename == "Bool":
 		return CoolBool("Bool", {}, 0, False)
 	else:
-		return Void("IO") #should be void obj repre
+		return "no default value" #should be void obj repre
 
 
 def eval(self_object,store,env,exp):
-    global indent_count
-    indent_count += 2
-    debug(f"eval: {str(exp)}")
-    debug(f"so: {str(self_object)}")
-    debug(f"store: {str(store)}")
-    debug(f"env: {str(env)}")
-    debug(f"exp: {str(exp)}")
-    print("210", env)
+	global indent_count
+	indent_count += 2
+	debug(f"eval: {str(exp)}")
+	debug(f"so: {str(self_object)}")
+	debug(f"store: {str(store)}")
+	debug(f"env: {str(env)}")
+	debug(f"exp: {str(exp)}")
 
-    if isinstance(exp, Assign):
-        # exp.exp returns a list. select first element exp.exp[0]
-        (v1,s2) = eval(self_object,store,env,exp.exp[0])	
-        l1 = env[exp.var]	
-        del s2[l1] #FIXME: does this delete every instance?
-        s3 = s2
-        s3[l1] = v1
-        # debug("ret = %s" % (v1))
-        # debug("rets = %s" % (s3))
-        indent_count -= 2
-        return (v1,s3)
+	if isinstance(exp, New): 
+		class_name = exp.exp
+		attr_and_inits = class_map[class_name]
+		new_attrs_locs = [newloc() for _ in attr_and_inits]
+  
+		attr_names = []
+		for at in attr_and_inits:
+			attr_names.append(at[0])
+   
+		attrs_and_locs = dict(zip(attr_names, new_attrs_locs))
+		v1 = CoolObject(class_name, attrs_and_locs, 0)
+		s2 = store
+		for attr_name in attrs_and_locs.keys():
+			attr_loc = attrs_and_locs[attr_name]
+			for (attr_name2, attr_type, _) in attr_and_inits:
+				if attr_name == attr_name2:
+					s2[attr_loc] = default_value(attr_type)
+ 
+		final_store = s2
+		for (attr_name,_,attr_init) in attr_and_inits:
+			if attr_init != []:
+				(_,current_store) = eval(v1, final_store, attrs_and_locs, Assign(0,attr_name,attr_init))
+				final_store = current_store
 
-    elif isinstance(exp, New):
-        # TODO: need to deal with SELF_TYPE
-        cname = exp.exp
-        attrs_and_inits = class_map[cname]
-        new_attrs_locs = [newloc() for x in attrs_and_inits]
-        attr_names = [attr_name for (attr_name,attr_type,attr_exp) in attrs_and_inits]
-        attrs_and_locs = dict(zip(attr_names, new_attrs_locs))
-        v1 = CoolObject(cname, attrs_and_locs, 0)
-        # iterate through key,value pairs (attrname to loc)
-        s2 = store
-        for (attr_name, attr_loc) in attrs_and_locs.items():
-        # find the attr_name in the class map
-            for (attr_name2, attr_type, attr_exp) in attrs_and_inits:
-        # get the type from it and return the default value, make the pairing
-                if attr_name == attr_name2:
-                    s2[attr_loc] = default_value(attr_type)
-        final_store = s2
-        for (attr_name,_,attr_init) in attrs_and_inits:
-            if attr_init != []:
-                (_,current_store) = eval(v1,final_store,attrs_and_locs,Assign(0,attr_name,attr_init))
-                final_store = current_store
-            # FIXME: 0 in Assign constructor might make troubles
+		debug(f"ret = {str(v1)}")
+		debug(f"rets = {str(final_store)}")
+		indent_count -= 2
+		return (v1,final_store)
+	elif isinstance(exp, Assign):
+		(v1, s2) = eval(self_object, store, env, exp.exp[0])	
+		l1 = env[exp.var]	
+		del s2[l1]
+		s3 = s2
+		s3[l1] = v1 # replace s2's l1 with v1
+		debug(f"ret = {(v1)}")
+		debug(f"rets = {(s3)}")
+		indent_count -= 2
+		return (v1,s3)
+	elif isinstance(exp, SelfDispatch):
+		# call dynamic_dispatch, but use the self object as receiver exp
+		self_exp = Identifier(0, "self")
+		ret_exp = DynamicDispatch(exp.loc, self_exp, exp.methodName, exp.exp)
+		(ret_value,ret_store) = eval(self_object,store,env,ret_exp)
+		debug(f"ret = {str(ret_value)}")
+		debug(f"rets = {str(ret_store)}")
+		indent_count -= 2
+		return (ret_value,ret_store)
+	elif isinstance(exp, DynamicDispatch):
+		current_store = copy.deepcopy(store)
+		arg_values = []
+		# eval each arg while updating store
+		for arg in exp.exp:
+			(arg_value, new_store) = eval(self_object,current_store,env,arg)
+			current_store = new_store
+			arg_values.append(arg_value)
 
-        debug(f"ret = {v1}")
-        debug(f"rets = {final_store}")
-        indent_count -= 2
-        return (v1,final_store)
+		if exp.methodName == "out_string": #TODO: handle other method, maybe modularize
+			#replace \n str representation to actual \n
+			print(arg_values[0].value.replace("\\n","\n"), end="")
 
-    elif isinstance(exp, SelfDispatch):
-        # call dynamic_dispatch, but use the self object as receiver exp
-        self_exp = Identifier(0, "self")
-        ret_exp = DynamicDispatch(exp.loc, self_exp, exp.methodName, exp.exp)
-        (ret_value,ret_store) = eval(self_object,store,env,ret_exp)
-        debug(f"ret = {str(ret_value)}")
-        debug(f"rets = {str(ret_store)}")
-        indent_count -= 2
-        return (ret_value,ret_store)
-    elif isinstance(exp, DynamicDispatch):
-        current_store = copy.deepcopy(store)
-        arg_values = []
-        # eval each arg while updating store
-        for arg in exp.exp:
-            (arg_value, new_store) = eval(self_object,current_store,env,arg)
-            current_store = new_store
-            arg_values.append(arg_value)
-
-        if exp.methodName == "out_string": #TODO: handle other method, maybe modularize
-            #replace \n str representation to actual \n
-            print(arg_values[0].value.replace("\\n","\n"), end="")
-
-        # eval receiver expression
-        (v0, s_n2) = eval(self_object, current_store, env, exp.e)
-        print("imp_map", imp_map)
-        print("(v0, exp.methodName)", (v0, exp.methodName))
-        (formals, body) = imp_map[(v0.className, exp.methodName)]
-        # allocate mem for each args
-        new_arg_locs = [ newloc() for _ in exp.exp]
-        s_n3 = s_n2
-        store_update = dict(zip(new_arg_locs, arg_values))
-        for loc in store_update.keys(): 
-            s_n3[loc] = store_update[loc]
-
-        (ret_value,ret_store) = eval(v0, s_n3, v0.get_attrs_and_locs(), body)
-        debug(f"ret = {str(ret_value)}")
-        debug(f"rets = {str(ret_store)}")
-        indent_count -= 2
-        return (ret_value,ret_store)
-    elif isinstance(exp, Plus): 
-        e1 = exp.exp[0]
-        e2 = exp.exp[1]
-        v1, s2 = eval(self_object,store,env,e1)
-        v2, s3 = eval(self_object,store,env,e2)
-        new_value = v1.value + v2.value
-        debug(f"ret = {str(new_value)}")
-        debug(f"rets = {str(store)}")
-        indent_count -= 2
-        return (CoolInt("Int", {}, 0, new_value), store)
-    elif isinstance(exp, Integer):
-        value = int(exp.exp)
-        debug(f"ret = {str(value)}")
-        debug(f"rets = {str(store)}")
-        indent_count -= 2
-        return (CoolInt("Int", {}, 0, value), store)
-    elif isinstance(exp, String):
-        value = str(exp.exp)
-        length = len(value)
-        debug(f"ret = {str(value)}")
-        debug(f"rets = {str(store)}")
-        indent_count -= 2
-        return (CoolString("String", {}, 0, value, length), store)
-    elif isinstance(exp, Identifier):
-        print("314", exp)
-        id = exp.exp
-        if id == "self":
-            return (self_object,store)
-        print("318", env)
-        loc = env[id]
-        value = store[loc]
-        debug(f"ret = {str(value)}")
-        debug(f"rets = {str(store)}")
-        indent_count -= 2
-        return (value,store)
-    elif isinstance(exp, SELF_TYPE):
-        return (self_object,store)
-    elif isinstance(exp, IsVoid):
-        pass
-    elif isinstance(exp, false):
-        pass
-    elif isinstance(exp, true):
-        pass
-    else:
-        print(f"unhandeled error for {exp}")
-        exit(0)
+		# eval receiver expression
+		(v0,s_n2) = eval(self_object, current_store, env, exp.e)
+		(formals, body) = imp_map[(v0.className, exp.methodName)]
+		# allocate mem for each args
+		new_arg_locs = [ newloc() for _ in exp.exp]
+		s_n3 = s_n2
+		store_update = dict(zip(new_arg_locs, arg_values))
+		for loc in store_update.keys(): 
+			s_n3[loc] = store_update[loc]
+   
+		(ret_value,ret_store) = eval(v0, s_n3, v0.attrs_and_locs, body)
+		debug(f"ret = {str(ret_value)}")
+		debug(f"rets = {str(ret_store)}")
+		indent_count -= 2
+		return (ret_value,ret_store)
+	elif isinstance(exp, Plus): 
+		e1 = exp.exp[0]
+		e2 = exp.exp[1]
+		v1, s2 = eval(self_object,store,env,e1)
+		v2, s3 = eval(self_object,store,env,e2)
+		new_value = v1.value + v2.value
+		debug(f"ret = {str(new_value)}")
+		debug(f"rets = {str(store)}")
+		indent_count -= 2
+		return (CoolInt("Int", {}, 0, new_value), store)
+	elif isinstance(exp, Integer):
+		value = int(exp.exp)
+		debug(f"ret = {str(value)}")
+		debug(f"rets = {str(store)}")
+		indent_count -= 2
+		return (CoolInt("Int", {}, 0, value), store)
+	elif isinstance(exp, String):
+		value = str(exp.exp)
+		length = len(value)
+		debug(f"ret = {str(value)}")
+		debug(f"rets = {str(store)}")
+		indent_count -= 2
+		return (CoolString("String", {}, 0, value, length), store)
+	elif isinstance(exp, Identifier):
+		id = exp.exp
+		if id == "self":
+			return (self_object,store)
+		loc = env[id]
+		value = store[loc]
+		debug(f"ret = {str(value)}")
+		debug(f"rets = {str(store)}")
+		indent_count -= 2
+		return (value,store)
+	elif isinstance(exp, SELF_TYPE):
+		return (self_object,store)
+	elif isinstance(exp, IsVoid):
+		pass
+	elif isinstance(exp, false):
+		pass
+	elif isinstance(exp, true):
+		pass
+	else:
+		print(f"unhandeled error for {exp}")
+		exit(0)
 
 # cool entry point is Main's main method
 entry_point = DynamicDispatch(0, New(0, "Main"), "main", [])
