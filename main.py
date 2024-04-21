@@ -471,6 +471,46 @@ def eval(self_object,store,env,exp):
 		return (CoolBool(False), store)
 	elif isinstance(exp, true):
 		return (CoolBool(True), store)
+	elif isinstance(exp, If): #yonas
+		#true and false conditions
+		pred = exp.predicate
+		(value, new_store) = eval(self_object, store, env, pred)
+		if isinstance(value, CoolBool(True)):
+			#eval the then expression
+			return  eval(self_object, new_store, env,exp.then)
+		else:
+			return eval(self_object, new_store, env, exp.else_exp)
+			#eval the else expression
+
+	elif isinstance(exp, While): #yonas
+		pred = exp.pred
+		(value, new_store) = eval(self_object, store, env, pred)
+		if isinstance(value, CoolBool(True)):
+			#recursive until val returned is false
+			(v3, s3)= eval(self_object, new_store, env, exp.body) 
+   			# we want just the last one tho
+			while isinstance(v3, CoolBool(True)):
+				(v3, s3)= eval(self_object, s3, env, exp.body)
+			return (v3, s3) #last side effect
+		else:
+			return eval(self_object, store, env, exp.body)
+
+	elif isinstance(exp, Let): #yonas
+		body = exp.body
+		(v1, s2) = eval(self_object, store, env, body)
+		l1 = newloc()
+		s2[l1] = v1
+		s3 = copy.deepcopy(s2)
+		env[l1] = body
+		new_env = copy.deepcopy(env)
+		#binding list elements
+		binding_list = exp.binding_list
+		s4 = None ; v2 = None
+		for bind in binding_list:
+			(s4, v2) = eval(self_object, s3, new_env, bind)
+		return (s4, v2)
+
+      
 	else:
 		print(f"unhandled exp for {exp}")
 		exit(0)
