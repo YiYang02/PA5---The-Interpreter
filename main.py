@@ -49,11 +49,12 @@ class CoolInt(namedtuple("CoolInt", "value"), FieldUpdate): pass
 class CoolString(namedtuple("CoolString", "loc value length"), FieldUpdate): pass 
 class CoolBool(namedtuple("CoolString", "value"), FieldUpdate): pass 
 class CoolObject(namedtuple("CoolObject", "className attrs_and_locs loc"), FieldUpdate): pass
+class Internal(namedtuple("Internal", "loc body return_type parent")) : pass
 
 class Void(namedtuple("Void", "className")) : pass
 
 # Debugging and Tracing
-do_debug = False
+do_debug = True
 global indent_count
 indent_count = 0
 	
@@ -113,18 +114,19 @@ def read_id(e):
 
 def read_internal_exp(e):
 	loc = read(e)  
-	_ = read(e) #what kind of expression
+	return_type = read(e) # what kind of expression
 	_ = read(e) # 'internal' ast label
 	body = read(e)	
-	return SELF_TYPE(loc, body) #TODO : this is hardcoded
+	parent = body.split(".")[0]
+	return Internal(loc,body,return_type, parent)
 
 
 def read_binding(e):
 	bkind = read(e)
 	if bkind == "let_binding_init":
-		binding_id = read_id()
-		binding_id_type = read_id()
-		binding_exp = read_exp()
+		binding_id = read_id(e)
+		binding_id_type = read_id(e)
+		binding_exp = read_exp(e)
 		return Binding(binding_id, binding_id_type, binding_exp)
 	else:
 		binding_id = read_id(e)
@@ -132,7 +134,6 @@ def read_binding(e):
 		return Binding(binding_id, binding_id_type, None)
 
 def read_exp(e):
-	
 	if e[1][0].islower():
 		loc = read(e)
 		e_kind = read(e)
@@ -219,8 +220,9 @@ def read_exp(e):
 		return If(loc, pred, then, else_s)
 	elif e_kind == "block":
 		exp_count = int(read(e))
-		all_exps = [read_exp(e) for e in range(exp_count)]
-		return Block(loc, all_exps)
+		debug(f"exp count is {exp_count}")
+		all_exps = [read_exp(e) for _ in range(exp_count)]
+		return Block(loc,  all_exps)
 	elif e_kind == "while":
 		pred = read_exp(e)
 		body = read_exp(e)
@@ -237,9 +239,10 @@ def read_exp(e):
 		return Case(loc, exp, case_elem_list)
 	elif e_kind == "let":
 		num_bindings = int(read(e))
-		binding_list = [read_binding(e) for i in range(num_bindings)]
+		binding_list = [read_binding(e) for _ in range(num_bindings)]
 		body = read_exp(e)
-		return Let(loc, binding_list, body)
+		
+		return Let(loc, body, binding_list)
 	else:
 		print(f"e_kind not handled {e_kind}")
 		exit(0)
@@ -255,6 +258,7 @@ def populate_class_map(class_map_ast):
     for i in range(num_classes):
         class_name = read(class_map_ast)
         num_attributes = int(read(class_map_ast))
+        debug(f"num of attributes {num_attributes}")
         attributes = []
         for j in range(num_attributes):
             is_init = read(class_map_ast)
@@ -280,6 +284,7 @@ def populate_imp_map(imp_map_ast):
 				m_body = read_internal_exp(imp_map_ast)
 			else:
 				m_body = read_exp(imp_map_ast)
+
 			imp_map[(class_name,method_name)] = (formal_list, m_body)
 
 
@@ -305,7 +310,7 @@ def default_value(typename):
 		return Void("RETURNED VOID") 
 
 
-def eval(self_object,store,env,exp):
+def eval(self_object, store, env, exp):
 	global indent_count
 	indent_count += 2
 	debug(f"eval: {str(exp)}")
@@ -315,7 +320,9 @@ def eval(self_object,store,env,exp):
 	debug(f"exp: {str(exp)}")
 
 	if isinstance(exp, New): 
+		debug(f"IN NEW\n")
 		class_name = exp.exp
+		debug(f"class map is {str(class_map)}")
 		attr_and_inits = class_map[class_name]
 		new_attrs_locs = [newloc() for _ in attr_and_inits]
 
@@ -324,6 +331,7 @@ def eval(self_object,store,env,exp):
 			attr_names.append(at[0])
 
 		attrs_and_locs = dict(zip(attr_names, new_attrs_locs))
+		debug(f"IN NEW ATTRS AND LOC IS {str(attrs_and_locs)}")
 		v1 = CoolObject(class_name, attrs_and_locs, 0)
 		s2 = copy.deepcopy(store)
 			
@@ -345,17 +353,19 @@ def eval(self_object,store,env,exp):
 		indent_count -= 2
 		return (v1,final_store)
 	elif isinstance(exp, Assign):
+		debug("IN ASSIGN\n")
 		(v1, s2) = eval(self_object, store, env, exp.exp)	
 		l1 = env[exp.var]	
 		del s2[l1]
 		s3 = s2
 		s3[l1] = v1 # replace s2's l1 with v1
-		v1._replace(loc = l1)
+		# v1 = v1._replace(loc = l1)
 		debug(f"ret = {(v1)}")
 		debug(f"rets = {(s3)}")
 		indent_count -= 2
 		return (v1,s3)
 	elif isinstance(exp, SelfDispatch):
+		debug("IN SELF DISPATCH\n")
 		# call dynamic_dispatch, but use the self object as receiver exp
 		self_exp = Identifier(0, "self")
 		ret_exp = DynamicDispatch(exp.loc, self_exp, exp.methodName, exp.exp)
@@ -365,6 +375,7 @@ def eval(self_object,store,env,exp):
 		indent_count -= 2
 		return (ret_value,ret_store)
 	elif isinstance(exp, DynamicDispatch):
+		debug("IN DYNMAIC DISPATCH\n")
 		curr_store = copy.deepcopy(store)
 		arg_values = []
 		# eval each arg while updating store
@@ -373,18 +384,15 @@ def eval(self_object,store,env,exp):
 			curr_store = new_store
 			arg_values.append(arg_value)
 
-		print("280", exp.methodName)
-		print("281", exp)
 		if exp.methodName == "out_string": #TODO: handle other method, maybe modularize
 			#replace \n str representation to actual \n
 			print(arg_values[0].value.replace("\\n","\n"), end="")
 		elif exp.methodName == "out_int":
-			print("got here")
-			print(int(arg_values[0].value.replace("\\n","\n"), end=""))
+			print(arg_values[0].value, end="")
 
 		# eval receiver expression
 		(v0, s_n2) = eval(self_object, curr_store, env, exp.e)
-		print("288", v0)
+		debug(f"vo is {v0}")
 		(formals, body) = imp_map[(v0.className, exp.methodName)]
 		# allocate mem for each args
 		new_arg_locs = [ newloc() for _ in exp.exp]
@@ -396,14 +404,16 @@ def eval(self_object,store,env,exp):
 		new_enviroment = copy.deepcopy(v0.attrs_and_locs)
 		env_update = dict(zip(formals, new_arg_locs))
 		for (identifier,loc) in env_update.items():
-			env_update[identifier] = loc
+			new_enviroment[identifier] = loc
 
+		debug(f"ENV UPDATE DYNAMIC IS {str(env_update)}")
 		(ret_value,ret_store) = eval(v0, s_n3, new_enviroment, body)
 		debug(f"ret = {str(ret_value)}")
 		debug(f"rets = {str(ret_store)}")
 		indent_count -= 2
 		return (ret_value,ret_store)
 	elif isinstance(exp, StaticDispatch):
+		debug("IN STATIC DISPATCH\n")
 		curr_store = copy.deepcopy(store)
 		arg_values = []
 
@@ -420,10 +430,11 @@ def eval(self_object,store,env,exp):
 			new_store[loc]._replace(loc = loc)
 			s_n3[loc] = new_store[loc]
 
-		new_env = v0.attrs_and_locs
+		new_env = copy.deepcopy(v0.attrs_and_locs)
 		env_update = dict(zip(formals, new_arg_locs))
 		for id in env_update.keys():
 			new_env[id] = env_update[id]
+		debug(f"ENV UPDATE IS {str(env_update)})")
 
 		(ret_value, ret_store) = eval(v0, s_n3, new_env, body)
 		debug(f"ret = {ret_value}")
@@ -431,22 +442,32 @@ def eval(self_object,store,env,exp):
 		indent_count -= 2
 		return (ret_value, ret_store)
 	elif isinstance(exp, Plus): 
-		e1 = exp.exp[0]
-		e2 = exp.exp[1]
-		v1, s2 = eval(self_object,store,env,e1)
-		v2, s3 = eval(self_object,store,env,e2)
+		debug("IN PLUS\n")
+		v1, s2 = eval(self_object,store,env,exp.left_exp)
+		v2, s3 = eval(self_object,store,env,exp.right_exp)
 		new_value = v1.value + v2.value
 		debug(f"ret = {str(new_value)}")
 		debug(f"rets = {str(store)}")
 		indent_count -= 2
-		return (CoolInt("Int", {}, 0, new_value), store)
+		return (CoolInt(new_value), store)
+	elif isinstance(exp, Minus): 
+		debug("IN PLUS\n")
+		v1, s2 = eval(self_object,store,env,exp.left_exp)
+		v2, s3 = eval(self_object,store,env,exp.right_exp)
+		new_value = v1.value - v2.value
+		debug(f"ret = {str(new_value)}")
+		debug(f"rets = {str(store)}")
+		indent_count -= 2
+		return (CoolInt(new_value), store)
 	elif isinstance(exp, Integer):
+		debug("IN INTEGER\n")
 		value = int(exp.exp)
 		debug(f"ret = {str(value)}")
 		debug(f"rets = {str(store)}")
 		indent_count -= 2
-		return (CoolInt("Int", {}, 0, value), store)
+		return (CoolInt(value), store)
 	elif isinstance(exp, String):
+		debug("IN STRING\n")
 		value = str(exp.exp)
 		length = len(value)
 		debug(f"ret = {str(value)}")
@@ -454,6 +475,7 @@ def eval(self_object,store,env,exp):
 		indent_count -= 2
 		return (CoolString(0, value, length), store)
 	elif isinstance(exp, Identifier):
+		debug("IN IDENTIFIER\n")
 		id = exp.exp
 		if id == "self":
 			return (self_object,store)
@@ -463,19 +485,55 @@ def eval(self_object,store,env,exp):
 		debug(f"rets = {str(store)}")
 		indent_count -= 2
 		return (value,store)
-	elif isinstance(exp, SELF_TYPE):
-		return (self_object,store)
+	elif isinstance(exp, Internal):
+		debug("IN INTERNAL\n")
+		
 	elif isinstance(exp, IsVoid):
 		pass
+	elif isinstance(exp, Equal):
+		debug("IN EQUAL\n")
+		(i1, s2) = eval(self_object, store, env, exp.left_exp)
+		(i2, s3) = eval(self_object, store, env, exp.right_exp)
+		if i1.value == i2.value:
+			v1 = CoolBool(True)
+			return (v1, s3)
+		else:
+			v1 = CoolBool(False)
+			return (v1, s3)
+	elif isinstance(exp, LE):
+		debug("IN LE\n")
+		(i1, s2) = eval(self_object, store, env, exp.left_exp)
+		(i2, s3) = eval(self_object, store, env, exp.right_exp)
+		if i1.value <= i2.value:
+			v1 = CoolBool(True)
+			return (v1, s3)
+		else:
+			v1 = CoolBool(False)
+			return (v1, s3)
+	elif isinstance(exp, LT):
+		debug("IN LT\n")
+		(i1, s2) = eval(self_object, store, env, exp.left_exp)
+		(i2, s3) = eval(self_object, store, env, exp.right_exp)
+		if i1.value < i2.value:
+			v1 = CoolBool(True)
+			return (v1, s3)
+		else:
+			v1 = CoolBool(False)
+			return (v1, s3)
 	elif isinstance(exp, false):
+		debug("IN FALSE\n")
 		return (CoolBool(False), store)
 	elif isinstance(exp, true):
+		debug("IN TRUE\n")
 		return (CoolBool(True), store)
 	elif isinstance(exp, If): #yonas
+		debug("IN IF\n")
 		#true and false conditions
 		pred = exp.predicate
 		(value, new_store) = eval(self_object, store, env, pred)
-		if isinstance(value, CoolBool(True)):
+		debug(f"ret = {str(value)}")
+		debug(f"rets = {str(new_store)}")
+		if value.value == True:
 			#eval the then expression
 			return  eval(self_object, new_store, env,exp.then)
 		else:
@@ -483,25 +541,28 @@ def eval(self_object,store,env,exp):
 			#eval the else expression
 
 	elif isinstance(exp, While): #yonas
+		debug("IN WHILE\n")
 		pred = exp.pred
-		(value, new_store) = eval(self_object, store, env, pred)
-		if isinstance(value, CoolBool(True)):
+		(v1, s2) = eval(self_object, store, env, pred)
+		if v1.value == True:
 			#recursive until val returned is false
-			(v3, s3)= eval(self_object, new_store, env, exp.body) 
-   			# we want just the last one tho
-			while isinstance(v3, CoolBool(True)):
-				(v3, s3)= eval(self_object, s3, env, exp.body)
-			return (v3, s3) #last side effect
+			(v3, s3) = eval(self_object, s2, env, exp.body) 
+			debug(f"v3 from while is {v3}")
+			# we want just the last one tho
+			return eval(self_object, s3, env, v3)
 		else:
-			return eval(self_object, store, env, exp.body)
+			return (Void("void"), s2)
 
 	elif isinstance(exp, Let): #yonas
+		debug("IN LET\n")
 		body = exp.body
 		(v1, s2) = eval(self_object, store, env, body)
+		debug(f"v1 is {v1}")
+		debug(f"body is {body}")
 		l1 = newloc()
 		s2[l1] = v1
 		s3 = copy.deepcopy(s2)
-		env[l1] = body
+		env[body] = l1
 		new_env = copy.deepcopy(env)
 		#binding list elements
 		binding_list = exp.binding_list
@@ -509,8 +570,16 @@ def eval(self_object,store,env,exp):
 		for bind in binding_list:
 			(s4, v2) = eval(self_object, s3, new_env, bind)
 		return (s4, v2)
-
-      
+	elif isinstance(exp, Block):
+		debug("IN BLOCK\n")
+		v1 = None ; s2 = None
+		for exp in exp.expList: # returns the last line of the block
+			v1, s2 = eval(self_object, store, env, exp) 
+		return (v1, s2)
+	elif isinstance(exp, Binding):
+		print("got here")
+	# elif isinstance(exp, CoolObject):
+	# 	pass
 	else:
 		print(f"unhandled exp for {exp}")
 		exit(0)
