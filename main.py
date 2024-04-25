@@ -46,15 +46,15 @@ class StaticDispatch(namedtuple("StaticDispatch", "loc e type methodName exp")):
 
 class CoolValue(namedtuple("CoolValue", "type value")): pass 
 class CoolInt(namedtuple("CoolInt", "value"), FieldUpdate): pass 
-class CoolString(namedtuple("CoolString", "loc value length"), FieldUpdate): pass 
+class CoolString(namedtuple("CoolString", "value length"), FieldUpdate): pass 
 class CoolBool(namedtuple("CoolString", "value"), FieldUpdate): pass 
 class CoolObject(namedtuple("CoolObject", "className attrs_and_locs loc"), FieldUpdate): pass
-class Internal(namedtuple("Internal", "loc body return_type parent")) : pass
+class InternalMethod(namedtuple("InternalMethod", "loc methodName return_type parent")) : pass
 
 class Void(namedtuple("Void", "className")) : pass
 
 # Debugging and Tracing
-do_debug = True
+do_debug = False
 global indent_count
 indent_count = 0
 	
@@ -117,8 +117,9 @@ def read_internal_exp(e):
 	return_type = read(e) # what kind of expression
 	_ = read(e) # 'internal' ast label
 	body = read(e)	
+	method_name = "".join(body.split(".")[1])
 	parent = body.split(".")[0]
-	return Internal(loc,body,return_type, parent)
+	return InternalMethod(loc,method_name,return_type, parent)
 
 
 def read_binding(e):
@@ -303,7 +304,7 @@ def default_value(typename):
 	if typename == "Int":
 		return CoolInt(0)
 	elif typename == "String":
-		return CoolString(0, "", 0)
+		return CoolString("", 0)
 	elif typename == "Bool":
 		return CoolBool(False)
 	else:
@@ -384,11 +385,11 @@ def eval(self_object, store, env, exp):
 			curr_store = new_store
 			arg_values.append(arg_value)
 
-		if exp.methodName == "out_string": #TODO: handle other method, maybe modularize
-			#replace \n str representation to actual \n
-			print(arg_values[0].value.replace("\\n","\n"), end="")
-		elif exp.methodName == "out_int":
-			print(arg_values[0].value, end="")
+		# if exp.methodName == "out_string": #TODO: handle other method, maybe modularize
+		# 	#replace \n str representation to actual \n
+		# 	print(arg_values[0].value.replace("\\n","\n"), end="")
+		# elif exp.methodName == "out_int":
+		# 	print(arg_values[0].value, end="")
 
 		# eval receiver expression
 		(v0, s_n2) = eval(self_object, curr_store, env, exp.e)
@@ -451,7 +452,7 @@ def eval(self_object, store, env, exp):
 		indent_count -= 2
 		return (CoolInt(new_value), store)
 	elif isinstance(exp, Minus): 
-		debug("IN PLUS\n")
+		debug("IN MINUS\n")
 		v1, s2 = eval(self_object,store,env,exp.left_exp)
 		v2, s3 = eval(self_object,store,env,exp.right_exp)
 		new_value = v1.value - v2.value
@@ -473,7 +474,7 @@ def eval(self_object, store, env, exp):
 		debug(f"ret = {str(value)}")
 		debug(f"rets = {str(store)}")
 		indent_count -= 2
-		return (CoolString(0, value, length), store)
+		return (CoolString(value, length), store)
 	elif isinstance(exp, Identifier):
 		debug("IN IDENTIFIER\n")
 		id = exp.exp
@@ -485,8 +486,35 @@ def eval(self_object, store, env, exp):
 		debug(f"rets = {str(store)}")
 		indent_count -= 2
 		return (value,store)
-	elif isinstance(exp, Internal):
+	elif isinstance(exp, InternalMethod):
 		debug("IN INTERNAL\n")
+		val = store[env['x']].value		
+		if exp.methodName == "out_string":
+			print(val.replace("\\n", "\n").replace("\\t", "\t"), end="")
+			return self_object, store
+		elif exp.methodName == "out_int":
+			 # x is the arg for out_int, i.e. out_int(x)
+			print(val, end="")
+			return self_object, store
+		elif exp.methodName == "in_string":
+			pass
+		elif exp.methodName == "in_int":
+			pass
+		elif exp.methodName == "length":
+			pass
+		elif exp.methodName == "concat":
+			pass
+		elif exp.methodName == "substr":
+			pass
+		elif exp.methodName == "abort": # TODO THIS DOESNT WORK YET
+			print("abort", end="")
+			sys.exit(0)
+		elif exp.methodName == "copy":
+			pass
+		elif exp.methodName == "type_name":
+			print(self_object)
+			class_name = self_object.className
+			return CoolString(class_name, len(class_name)), store
 		
 	elif isinstance(exp, IsVoid):
 		pass
@@ -547,39 +575,48 @@ def eval(self_object, store, env, exp):
 		if v1.value == True:
 			#recursive until val returned is false
 			(v3, s3) = eval(self_object, s2, env, exp.body) 
+			while_rep = While(exp.loc, pred, exp.body)
 			debug(f"v3 from while is {v3}")
 			# we want just the last one tho
-			return eval(self_object, s3, env, v3)
+			return eval(self_object, s3, env, while_rep)
 		else:
 			return (Void("void"), s2)
+	
 
-	elif isinstance(exp, Let): #yonas
+	elif isinstance(exp, Let):
 		debug("IN LET\n")
-		body = exp.body
-		(v1, s2) = eval(self_object, store, env, body)
-		debug(f"v1 is {v1}")
-		debug(f"body is {body}")
-		l1 = newloc()
-		s2[l1] = v1
-		s3 = copy.deepcopy(s2)
-		env[body] = l1
-		new_env = copy.deepcopy(env)
-		#binding list elements
-		binding_list = exp.binding_list
-		s4 = None ; v2 = None
-		for bind in binding_list:
-			(s4, v2) = eval(self_object, s3, new_env, bind)
-		return (s4, v2)
+		# go through bindings and update
+		e_prime = copy.deepcopy(env)
+		for binding in exp.binding_list:
+			env_id = binding.id.exp
+			e1 = binding.exp
+			v1, store = eval(self_object, store, env,e1)
+			l1 = newloc()
+			store[l1] = v1
+			e_prime[env_id] = l1
+
+		#body expression eval
+		v2, store = eval(self_object, store, e_prime, exp.body)
+		debug(f"ret = {str(v2)}")
+		debug(f"rets = {str(store)}")
+		return v2, store
+
+			
+	elif isinstance(exp, Binding):
+		debug("IN BINDING\n")
+		debug("SHOULD NEVER GET HERE\n")
+		return self_object, store
+
+	
 	elif isinstance(exp, Block):
 		debug("IN BLOCK\n")
 		v1 = None ; s2 = None
 		for exp in exp.expList: # returns the last line of the block
 			v1, s2 = eval(self_object, store, env, exp) 
 		return (v1, s2)
-	elif isinstance(exp, Binding):
-		print("got here")
-	# elif isinstance(exp, CoolObject):
-	# 	pass
+	
+	elif isinstance(exp, CoolObject):
+		return self_object, store
 	else:
 		print(f"unhandled exp for {exp}")
 		exit(0)

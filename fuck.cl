@@ -10,13 +10,10 @@
 --     };
 -- };
 
-class Main inherits IO {
-	count : Int <- 7;
-	main () : Object {{
-		
-		while 5 < count loop {
-			count <- count - 1;
-			out_int(count);
-		} pool;
-	}};
+(* Simple program with a lets statement *)
+class Main inherits IO{
+	x : Int <- 1;
+	main () : Object {
+		out_string(x.type_name())
+	};
 };
