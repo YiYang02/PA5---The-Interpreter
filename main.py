@@ -1,18 +1,15 @@
+"""
+Yi Yang
+Yonas G.
+CSCI 2320 - Principles of Programming Languages
+5 May, 2024
+"""
+
 import sys
 import copy
-
 from collections import namedtuple
 
-
-class FieldUpdate():
-    def set_attrs_and_locs(self, st): 
-        self.st = st
-    def get_attrs_and_locs(self): 
-        try:
-            return self.st
-        except:
-            pass
-        
+# Kinds of Expressions
 class New(namedtuple("New", "loc exp")): pass
 class IsVoid(namedtuple("IsVoid", "loc exp")): pass
 class LT(namedtuple("lt", "loc left_exp right_exp")): pass
@@ -45,16 +42,16 @@ class DynamicDispatch(namedtuple("DynamicDispatch", "loc e methodName exp")): pa
 class StaticDispatch(namedtuple("StaticDispatch", "loc e type methodName exp")): pass
 
 class CoolValue(namedtuple("CoolValue", "className type value")): pass 
-class CoolInt(namedtuple("CoolInt", "className attrs_and_locs value loc"), FieldUpdate): pass 
-class CoolString(namedtuple("CoolString", "className attrs_and_locs value length loc"), FieldUpdate): pass 
-class CoolBool(namedtuple("CoolString", "className attrs_and_locs value loc"), FieldUpdate): pass 
-class CoolObject(namedtuple("CoolObject", "className attrs_and_locs loc"), FieldUpdate): pass
-class InternalMethod(namedtuple("InternalMethod", "loc methodName return_type parent")) : pass
+class CoolInt(namedtuple("CoolInt", "className attrs_and_locs value loc")): pass 
+class CoolString(namedtuple("CoolString", "className attrs_and_locs value length loc")): pass 
+class CoolBool(namedtuple("CoolString", "className attrs_and_locs value loc")): pass 
+class CoolObject(namedtuple("CoolObject", "className attrs_and_locs loc")): pass
 
+class InternalMethod(namedtuple("InternalMethod", "loc methodName return_type parent")) : pass
 class Void(namedtuple("Void", "className")) : pass
 
-INT_MAX_VALUE = 2147483647
-INT_MIN_VALUE = 2147483648
+INT_MAX = 2147483647
+INT_MIN = -2147483648
 
 # Debugging and Tracing
 do_debug = False
@@ -82,7 +79,12 @@ class_map_ast = []
 parent_map_ast = []
 imp_map_ast = []
 
+
 def populate_ast_sections():
+	""" 
+	partitions the annotated ast into the different
+ 	sections, namely implementation map, parent map, and class map.
+ 	"""
 	current_section = None
 	for line in ast_file:
 		if line == "implementation_map":
@@ -97,7 +99,7 @@ def populate_ast_sections():
 	return current_section
 
 populate_ast_sections()
-# Deserialize the class_map
+
 class_map = {}
 imp_map = {}
 parent_map = {}
@@ -113,6 +115,13 @@ def read_id(e):
 	return Identifier(loc, name)
 
 def read_internal_exp(e):
+	""" 
+	When populating the implementation map, this function
+	helps to store internal methods in a special InternalMethod
+	object so that we could evaluate all internal methods
+	in one neat if condition in the 'eval' function. 
+	i.e if isinstance(exp, InternalMethod) -> handle methods here
+ 	"""
 	loc = read(e)  
 	return_type = read(e) # what kind of expression
 	_ = read(e) # 'internal' ast label
@@ -134,13 +143,12 @@ def read_binding(e):
 		return Binding(binding_id, binding_id_type, None)
 
 def read_exp(e):
-	debug(f"expression is {str(e)}")
+    # from ast, the extra class name we add that serves as a type
 	if e[1][0].isupper():
-		debug("got to upper")
 		loc = read(e)
 		_ = read(e)
 		e_kind = read(e)
-	else: # from ast, the extra class name we add that serves as a type
+	else: 
 		loc = read(e)
 		e_kind = read(e)
   
@@ -149,7 +157,7 @@ def read_exp(e):
 	elif e_kind == "not":
 		return Not(loc, read_exp(e))
 	elif e_kind == "isvoid":
-		return IsVoid(loc, read_exp(e))		# return t
+		return IsVoid(loc, read_exp(e))	
 	elif e_kind == "string":
 		str_constant = read(e) 
 		return String(loc, str_constant)
@@ -253,17 +261,24 @@ def read_exp(e):
 		exit(0)
 
 def populate_parent_map(parent_map_ast):
+	"""
+ 	Populate the parent_map dictionary with class-parent mappings parsed 
+  	from the provided ast.
+   	"""
 	num_classes = int(read(parent_map_ast))		
 	for _ in range(num_classes):
 		parent_map[read(parent_map_ast)] = read(parent_map_ast)
 		num_classes -= 1
   	
 def populate_class_map(class_map_ast):
+	"""
+	Populate the class_map dictionary with class attributes parsed 
+	from the provided ast.
+	"""
 	num_classes = int(read(class_map_ast))
 	for _ in range(num_classes):
 		class_name = read(class_map_ast)
 		num_attributes = int(read(class_map_ast))
-		debug(f"num of attributes {num_attributes}")
 		attributes = []
 		for _ in range(num_attributes):
 			is_init = read(class_map_ast)
@@ -276,6 +291,10 @@ def populate_class_map(class_map_ast):
 		class_map[class_name] = attributes
                 
 def populate_imp_map(imp_map_ast):
+	"""
+	Populate the imp_map dictionary with method implementations parsed from 
+ 	the AST
+	"""
 	num_classes = int(read(imp_map_ast))
 	for _ in range(num_classes):
 		class_name = read(imp_map_ast)
@@ -292,19 +311,19 @@ def populate_imp_map(imp_map_ast):
 
 			imp_map[(class_name,method_name)] = (formal_list, m_body)
 
-
-# first index is label (class_map, parent_map, implementation_map) etc
+# first index is label ie. (class_map, parent_map, implementation_map) etc
 populate_parent_map(parent_map_ast[1:])
 populate_class_map(class_map_ast[1:])
 populate_imp_map(imp_map_ast[1:])
 
 new_location_counter = 1000
-def newloc():
+
+def newloc(): #increments global counter by one each function invocation
 	global new_location_counter
 	new_location_counter += 1	
 	return new_location_counter
 
-def default_value(typename):
+def default_value(typename): #default values for the given types
 	if typename == "Int":
 		return CoolInt("Int", {}, 0, 0)
 	elif typename == "String":
@@ -315,6 +334,13 @@ def default_value(typename):
 		return Void("RETURNED VOID") 
 
 def eval(self_object, store, env, exp):
+	""" 
+	Main evaluation function. Recursive function that takes in 
+	the self object, current store, environment, and the current expression.
+	It defines the operational semantic rules found in the COOL manual 
+	for all of the expressions as well as handles the execution of internal
+	methods.
+	"""
 	global indent_count
 	indent_count += 2
 	debug(f"eval: {str(exp)}")
@@ -330,7 +356,6 @@ def eval(self_object, store, env, exp):
 			class_name = self_object.className
 		else:
 			class_name = exp.exp
-		debug(f"class map is {str(class_map)}")
 		attr_and_inits = class_map[class_name]
 		new_attrs_locs = [newloc() for _ in attr_and_inits]
 
@@ -339,14 +364,11 @@ def eval(self_object, store, env, exp):
 			attr_names.append(at[0])
 
 		attrs_and_locs = dict(zip(attr_names, new_attrs_locs))
-		debug(f"CLASS NAME {str(class_name)}")
 		if class_name in ["String", "Int", "Bool"]:
 			v1 = default_value(class_name)
-			debug(f"TESTING L;AH {str(v1)}")
 			v1 = v1._replace(attrs_and_locs = attrs_and_locs)
 		else:
 			v1 = CoolObject(class_name, attrs_and_locs, 0)
-		debug(f"IN NEW ATTRS AND LOC IS {str(attrs_and_locs)}")
 		s2 = copy.deepcopy(store)
 			
 		for attr_name in attrs_and_locs.keys():
@@ -354,7 +376,6 @@ def eval(self_object, store, env, exp):
 			for (attr_name2, attr_type, _) in attr_and_inits:
 				if attr_name == attr_name2:
 					s2[attr_loc] = default_value(attr_type)
-					# s2[attr_loc] = s2[attr_loc]._replace(loc = attr_loc)
 
 		final_store = s2
 		for (attr_name,_,attr_init) in attr_and_inits:
@@ -401,11 +422,11 @@ def eval(self_object, store, env, exp):
 
 		# eval receiver expression
 		(v0, s_n2) = eval(self_object, curr_store, env, exp.e)
-		debug(f"vo is {v0}")
 		if (v0.className, exp.methodName) not in imp_map:
 			print(f"ERROR: {str(loc)}: Exception: dispatch on void")
 			sys.exit(0)
 		(formals, body) = imp_map[(v0.className, exp.methodName)]
+  
 		# allocate mem for each args
 		new_arg_locs = [ newloc() for _ in formals]
 		s_n3 = s_n2
@@ -416,11 +437,11 @@ def eval(self_object, store, env, exp):
 			s_n3[loc] = value
 			
 		new_enviroment = copy.deepcopy(v0.attrs_and_locs)
-	 
 		env_update = dict(zip(formals, new_arg_locs))
 		for (identifier,loc) in env_update.items():
 			new_enviroment[identifier] = loc
 
+  
 		(ret_value, ret_store) = eval(v0, s_n3, new_enviroment, body)
 		debug(f"ret = {str(ret_value)}")
 		debug(f"rets = {str(ret_store)}")
@@ -437,6 +458,8 @@ def eval(self_object, store, env, exp):
 			arg_values.append(arg_value)
 		(v0, s_n2) = eval(self_object, curr_store, env, exp.e)
 		(formals, body) = imp_map[(exp.type, exp.methodName)]
+  
+  		# allocate mem for each args
 		new_arg_locs = [newloc() for f in formals]
 		s_n3 = s_n2
 		new_store = dict(zip(new_arg_locs, arg_values))
@@ -449,7 +472,6 @@ def eval(self_object, store, env, exp):
 		env_update = dict(zip(formals, new_arg_locs))
 		for id in env_update.keys():
 			new_env[id] = env_update[id]
-		debug(f"ENV UPDATE IS {str(env_update)})")
 
 		(ret_value, ret_store) = eval(v0, s_n3, new_env, body)
 		debug(f"ret = {ret_value}")
@@ -461,12 +483,11 @@ def eval(self_object, store, env, exp):
 		v1, s2 = eval(self_object,store,env,exp.left_exp)
 		v2, s3 = eval(self_object,store,env,exp.right_exp)
 		new_value = v1.value + v2.value
-		if new_value > INT_MAX_VALUE:
-			new_value -= INT_MIN_VALUE
-			new_value += -INT_MIN_VALUE
-		elif new_value < -INT_MIN_VALUE:
-			new_value += INT_MIN_VALUE
-			new_value += INT_MIN_VALUE
+		new_value %= (INT_MAX + 1)
+		if new_value < INT_MIN:
+			new_value += (INT_MAX + 1)
+		elif new_value > INT_MAX:
+			new_value -= (INT_MAX + 1)
 
 		debug(f"ret = {str(new_value)}")
 		debug(f"rets = {str(store)}")
@@ -477,12 +498,11 @@ def eval(self_object, store, env, exp):
 		v1, s2 = eval(self_object,store,env,exp.left_exp)
 		v2, s3 = eval(self_object,store,env,exp.right_exp)
 		new_value = v1.value - v2.value
-		if new_value < -INT_MIN_VALUE:
-			new_value += INT_MIN_VALUE
-			new_value += INT_MIN_VALUE
-		elif new_value > -INT_MAX_VALUE:
-			new_value += INT_MIN_VALUE
-			new_value += INT_MIN_VALUE
+		new_value %= (INT_MAX + 1)
+		if new_value < INT_MIN:
+			new_value += (INT_MAX + 1)
+		elif new_value > INT_MAX:
+			new_value -= (INT_MAX + 1)
 		debug(f"ret = {str(new_value)}")
 		debug(f"rets = {str(store)}")
 		indent_count -= 2
@@ -492,12 +512,11 @@ def eval(self_object, store, env, exp):
 		v1, s2 = eval(self_object,store,env,exp.left_exp)
 		v2, s3 = eval(self_object,store,env,exp.right_exp)
 		new_value = v1.value * v2.value
-		if new_value > INT_MAX_VALUE:
-			new_value -= INT_MIN_VALUE
-			new_value += INT_MIN_VALUE
-		elif new_value < -INT_MIN_VALUE:
-			new_value += INT_MIN_VALUE
-			new_value += INT_MIN_VALUE
+		new_value %= (INT_MAX + 1)  # range check
+		if new_value > INT_MAX:
+			new_value -= (INT_MAX + 1)  
+		elif new_value < INT_MIN:
+			new_value += (INT_MAX + 1)  
 		debug(f"ret = {str(new_value)}")
 		debug(f"rets = {str(store)}")
 		indent_count -= 2
@@ -510,12 +529,10 @@ def eval(self_object, store, env, exp):
 			print(f"ERROR: {exp.left_exp.loc}: Exception: division by zero")
 			sys.exit(0)
 		new_value = v1.value / v2.value
-		if new_value > INT_MAX_VALUE:
-			new_value -= INT_MIN_VALUE
-			new_value += -INT_MIN_VALUE
-		elif new_value < -INT_MIN_VALUE:
-			new_value += INT_MIN_VALUE
-			new_value += INT_MIN_VALUE
+		if new_value > INT_MAX:
+			new_value -= (INT_MAX - INT_MIN + 1)
+		elif new_value < INT_MIN:
+			new_value += (INT_MAX - INT_MIN + 1)
 		debug(f"ret = {str(new_value)}")
 		debug(f"rets = {str(store)}")
 		indent_count -= 2
@@ -525,12 +542,10 @@ def eval(self_object, store, env, exp):
 		debug("IN NEGATE\n")
 		v1, s2 = eval(self_object,store,env,exp.exp)
 		new_value = -v1.value
-		if new_value < -INT_MIN_VALUE:
-			new_value += INT_MIN_VALUE
-			new_value += INT_MIN_VALUE
-		elif new_value > INT_MAX_VALUE:
-			new_value -= INT_MIN_VALUE
-			new_value += INT_MIN_VALUE
+		if new_value < INT_MIN:
+			new_value += (INT_MAX - INT_MIN + 1)
+		elif new_value > INT_MAX:
+			new_value -= (INT_MAX - INT_MIN + 1)
 		debug(f"ret = {str(new_value)}")
 		debug(f"rets = {str(store)}")
 		indent_count -= 2
@@ -552,7 +567,6 @@ def eval(self_object, store, env, exp):
 		return (CoolString("String", {}, value, length, 0), store)
 	elif isinstance(exp, Identifier):
 		debug("IN IDENTIFIER\n")
-		debug(f"env here is {str(env)}")
 		id = exp.exp
 		if id == "self":
 			return (self_object,store)
@@ -576,12 +590,12 @@ def eval(self_object, store, env, exp):
 		elif exp.methodName == "in_string":
 			try:
 				read_line = input()
-				if '\x00' in read_line: # might fail
-					return CoolString("String", {}, "", 0), store
+				if '\x00' in read_line: # check if null character
+					return CoolString("String", {}, "",0, 0), store
 				else:
-					return CoolString("String", {}, read_line, 0), store
+					return CoolString("String", {}, read_line, len(read_line), 0), store
 			except EOFError:
-				return CoolString("String", {}, "", 0), store
+				return CoolString("String", {}, "", 0, 0), store
 		elif exp.methodName == "in_int":
 			try:
 				read_line = input()
@@ -593,24 +607,37 @@ def eval(self_object, store, env, exp):
 						numbers += c
 					else:
 						break
-				if len(numbers) == 0: # input didnt start with numbers
+				if len(numbers) == 0: # input didn't start with numbers
 					return CoolInt("Int", {}, 0, 0), store
-				
-				if int(numbers) > 2147483647 or int(numbers) < -2147483648: #check range
+ 
+				#check range
+				if int(numbers) > INT_MAX or int(numbers) < INT_MIN: 
 					return CoolInt("Int", {}, 0, 0), store
 				else:
 					return CoolInt("Int", {}, int(numbers), 0), store
-
 			except EOFError:
 				return CoolInt("Int", {}, 0, 0), store
 
 		elif exp.methodName == "length":
 			return CoolInt("Int", {}, self_object.length, 0)
 		elif exp.methodName == "concat":
-			pass
+			first_str = self_object.value.replace("\\n","\n")
+			second_str = store[env['s']].value.replace("\\n","\n")
+			concat = first_str + second_str
+			return CoolString("String", {}, concat,len(concat), 0), store
 		elif exp.methodName == "substr":
-			pass
-		elif exp.methodName == "abort": # TODO THIS DOESNT WORK YET
+			original_str = self_object.value.replace("\\n","\n")
+			start_idx = int(store[env['i']].value)
+			str_length = int(store[env['l']].value)
+			if start_idx < 0 or str_length < 0:
+				print("ERROR: 0: Exception: String.substr out of range")
+				sys.exit(0)
+			if (start_idx + str_length) > len(original_str):
+				print("ERROR: 0: Exception: String.substr out of range")
+				sys.exit(0)
+			substring = original_str[start_idx: start_idx + str_length]
+			return CoolString("String", {}, substring, len(substring), 0), store
+		elif exp.methodName == "abort":
 			print("abort")
 			sys.exit(0)
 		elif exp.methodName == "copy":
@@ -670,7 +697,7 @@ def eval(self_object, store, env, exp):
 	elif isinstance(exp, true):
 		debug("IN TRUE\n")
 		return (CoolBool("CoolBool", {}, True, 0), store)
-	elif isinstance(exp, If): #yonas
+	elif isinstance(exp, If): 
 		debug("IN IF\n")
 		#true and false conditions
 		pred = exp.predicate
@@ -684,7 +711,7 @@ def eval(self_object, store, env, exp):
 			return eval(self_object, new_store, env, exp.else_exp)
 			#eval the else expression
 
-	elif isinstance(exp, While): #yonas
+	elif isinstance(exp, While): 
 		debug("IN WHILE\n")
 		pred = exp.pred
 		(v1, s2) = eval(self_object, store, env, pred)
@@ -692,8 +719,8 @@ def eval(self_object, store, env, exp):
 			#recursive until val returned is false
 			(v3, s3) = eval(self_object, s2, env, exp.body) 
 			while_rep = While(exp.loc, pred, exp.body)
-			debug(f"v3 from while is {v3}")
-			# we want just the last one tho
+			debug(f"v3 from while loop is {v3}")
+			# we want just the last one value
 			return eval(self_object, s3, env, while_rep)
 		else:
 			return (Void("void"), s2)
@@ -718,7 +745,6 @@ def eval(self_object, store, env, exp):
 			
 	elif isinstance(exp, Binding):
 		debug("IN BINDING\n")
-		debug("SHOULD NEVER GET HERE\n")
 		return self_object, store
 	elif isinstance(exp, Block):
 		debug("IN BLOCK\n")  
@@ -734,14 +760,11 @@ def eval(self_object, store, env, exp):
 		debug("COOL OBJECT ___-----\n")
 		return self_object, store		
 	else:
-		# print(f"unhandled exp for {exp}")
 		exit(0)
 	
-
 # cool entry point is Main's main method
 entry_point = DynamicDispatch(0, New(0, "Main"), "main", [])
 (new_value, new_store) = eval(Void("ENTRY"), {}, {}, entry_point)
-# print((new_value, new_store))
 
 
 
