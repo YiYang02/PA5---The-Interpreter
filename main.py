@@ -9,6 +9,8 @@ import sys
 import copy
 from collections import namedtuple
 
+sys.setrecursionlimit(10000)
+
 # Kinds of Expressions
 class New(namedtuple("New", "loc exp")): pass
 class IsVoid(namedtuple("IsVoid", "loc exp")): pass
@@ -57,6 +59,8 @@ INT_MIN = -2147483648
 do_debug = False
 global indent_count
 indent_count = 0
+global activation_record_count
+activation_record_count = 0
 	
 def debug(e): 
 	global indent_count
@@ -146,7 +150,7 @@ def read_exp(e):
     # from ast, the extra class name we add that serves as a type
 	if e[1][0].isupper():
 		loc = read(e)
-		_ = read(e)
+		_ = read(e) #expression type
 		e_kind = read(e)
 	else: 
 		loc = read(e)
@@ -342,6 +346,7 @@ def eval(self_object, store, env, exp):
 	methods.
 	"""
 	global indent_count
+	global activation_record_count
 	indent_count += 2
 	debug(f"eval: {str(exp)}")
 	debug(f"so: {str(self_object)}")
@@ -351,6 +356,10 @@ def eval(self_object, store, env, exp):
 
 	if isinstance(exp, New): 
 		debug(f"IN NEW\n")
+		if activation_record_count == 1000:
+			print(f"ERROR: {str(exp.loc)}: Exception: stack overflow error")
+			sys.exit(0)
+		activation_record_count += 1
 		class_name = exp.exp
 		if class_name == "SELF_TYPE":
 			class_name = self_object.className
@@ -386,6 +395,7 @@ def eval(self_object, store, env, exp):
 		debug(f"ret = {str(v1)}")
 		debug(f"rets = {str(final_store)}")
 		indent_count -= 2
+		activation_record_count -= 1
 		return (v1,final_store)
 	elif isinstance(exp, Assign):
 		debug("IN ASSIGN\n")
@@ -402,6 +412,9 @@ def eval(self_object, store, env, exp):
 		return (v1, s3)
 	elif isinstance(exp, SelfDispatch):
 		debug("IN SELF DISPATCH\n")
+		if activation_record_count == 1000:
+			print(f"ERROR: {str(exp.loc)}: Exception: stack overflow error")
+			sys.exit(0)
 		# call dynamic_dispatch, but use the self object as receiver exp
 		self_exp = Identifier(0, "self")
 		ret_exp = DynamicDispatch(exp.loc, self_exp, exp.methodName, exp.exp)
@@ -412,6 +425,10 @@ def eval(self_object, store, env, exp):
 		return (ret_value, ret_store)
 	elif isinstance(exp, DynamicDispatch):
 		debug("IN DYNAMIC DISPATCH\n")
+		if activation_record_count == 1000:
+			print(f"ERROR: {str(exp.loc)}: Exception: stack overflow error")
+			sys.exit(0)
+		activation_record_count += 1
 		curr_store = copy.deepcopy(store)
 		arg_values = []
 		# eval each arg while updating store
@@ -423,7 +440,7 @@ def eval(self_object, store, env, exp):
 		# eval receiver expression
 		(v0, s_n2) = eval(self_object, curr_store, env, exp.e)
 		if (v0.className, exp.methodName) not in imp_map:
-			print(f"ERROR: {str(loc)}: Exception: dispatch on void")
+			print(f"ERROR: {str(exp.loc)}: Exception: dispatch on void")
 			sys.exit(0)
 		(formals, body) = imp_map[(v0.className, exp.methodName)]
   
@@ -446,9 +463,14 @@ def eval(self_object, store, env, exp):
 		debug(f"ret = {str(ret_value)}")
 		debug(f"rets = {str(ret_store)}")
 		indent_count -= 2
+		activation_record_count -= 1
 		return (ret_value,ret_store)
 	elif isinstance(exp, StaticDispatch):
 		debug("IN STATIC DISPATCH\n")
+		if activation_record_count == 1000:
+			print(f"ERROR: {str(exp.loc)}: Exception: stack overflow error")
+			sys.exit(0)
+		activation_record_count += 1
 		curr_store = copy.deepcopy(store)
 		arg_values = []
 
@@ -457,6 +479,11 @@ def eval(self_object, store, env, exp):
 			curr_store = new_store
 			arg_values.append(arg_value)
 		(v0, s_n2) = eval(self_object, curr_store, env, exp.e)
+  
+		if (v0.className, exp.methodName) not in imp_map:
+			print(f"ERROR: {str(exp.loc)}: Exception: dispatch on void")
+			sys.exit(0)
+   
 		(formals, body) = imp_map[(exp.type, exp.methodName)]
   
   		# allocate mem for each args
@@ -477,13 +504,14 @@ def eval(self_object, store, env, exp):
 		debug(f"ret = {ret_value}")
 		debug(f"rets = {ret_store}")
 		indent_count -= 2
+		activation_record_count -= 1
 		return (ret_value, ret_store)
 	elif isinstance(exp, Plus): 
 		debug("IN PLUS\n")
 		v1, s2 = eval(self_object,store,env,exp.left_exp)
 		v2, s3 = eval(self_object,store,env,exp.right_exp)
 		new_value = v1.value + v2.value
-		new_value %= (INT_MAX + 1)
+		new_value %= (INT_MAX + 1) #int value boundary checking
 		if new_value < INT_MIN:
 			new_value += (INT_MAX + 1)
 		elif new_value > INT_MAX:
@@ -498,7 +526,7 @@ def eval(self_object, store, env, exp):
 		v1, s2 = eval(self_object,store,env,exp.left_exp)
 		v2, s3 = eval(self_object,store,env,exp.right_exp)
 		new_value = v1.value - v2.value
-		new_value %= (INT_MAX + 1)
+		new_value %= (INT_MAX + 1)  #int value boundary checking
 		if new_value < INT_MIN:
 			new_value += (INT_MAX + 1)
 		elif new_value > INT_MAX:
@@ -512,7 +540,7 @@ def eval(self_object, store, env, exp):
 		v1, s2 = eval(self_object,store,env,exp.left_exp)
 		v2, s3 = eval(self_object,store,env,exp.right_exp)
 		new_value = v1.value * v2.value
-		new_value %= (INT_MAX + 1)  # range check
+		new_value %= (INT_MAX + 1)  #int value boundary checking
 		if new_value > INT_MAX:
 			new_value -= (INT_MAX + 1)  
 		elif new_value < INT_MIN:
@@ -542,7 +570,7 @@ def eval(self_object, store, env, exp):
 		debug("IN NEGATE\n")
 		v1, s2 = eval(self_object,store,env,exp.exp)
 		new_value = -v1.value
-		if new_value < INT_MIN:
+		if new_value < INT_MIN: #int value boundary checking
 			new_value += (INT_MAX - INT_MIN + 1)
 		elif new_value > INT_MAX:
 			new_value -= (INT_MAX - INT_MIN + 1)
@@ -584,7 +612,7 @@ def eval(self_object, store, env, exp):
 			return self_object, store
 		elif exp.methodName == "out_int":
 			val = store[env['x']].value	
-			 # x is the arg for out_int, i.e. out_int(x)
+			# x is the arg for out_int, i.e. out_int(x)
 			print(val, end=" ")
 			return self_object, store
 		elif exp.methodName == "in_string":
@@ -757,7 +785,7 @@ def eval(self_object, store, env, exp):
 		return (ret_value, s1)
 	
 	elif isinstance(exp, CoolObject):
-		debug("COOL OBJECT ___-----\n")
+		debug("COOL OBJECT\n")
 		return self_object, store		
 	else:
 		exit(0)
